@@ -8,14 +8,14 @@ import cv2
 import numpy as np
 from message_filters import ApproximateTimeSynchronizer, Subscriber
 
-from traj_visualizer import TrajectoryVisualizer
+from frontier_mapping.traj_visualizer import TrajectoryVisualizer
 
-from obstacle_map import ObstacleMap
-from object_point_cloud_map import ObjectPointCloudMap
+from frontier_mapping.obstacle_map import ObstacleMap
+from frontier_mapping.object_point_cloud_map import ObjectPointCloudMap
 
 from tf2_ros import TransformListener, Buffer
 from geometry_msgs.msg import TransformStamped
-import tf_transformations  # 用于处理四元数到旋转矩阵的转换
+import transforms3d as tfs
 
 class SemanticMappingNode(Node):
     def __init__(self):
@@ -25,21 +25,21 @@ class SemanticMappingNode(Node):
         
         #self._object_map: ObjectPointCloudMap = ObjectPointCloudMap(erosion_size=1.0)
         self._obstacle_map = ObstacleMap(
-                min_height=0.15,
-                max_height=0.88,
+                min_height=0.1,
+                max_height=1.0,
                 area_thresh=1.5,
                 agent_radius=0.18,
                 hole_area_thresh=100000,
             )
-        self.min_depth = 0.3
-        self.max_depth = 3.0
-        self.fx = 450
-        self.fy = 450
+        self.min_depth = 0.05
+        self.max_depth = 8.0
+        self.fx = 554
+        self.fy = 554
         self.topdown_fov = 1.3
 
         # Initialize Subscribers for RGB image, Depth image, and Odom data
-        self.rgb_sub = Subscriber(self, Image, '/camera/rgb/image_raw')
-        self.depth_sub = Subscriber(self, Image, '/camera/depth/image_raw')
+        self.rgb_sub = Subscriber(self, Image, '/rgb/image_raw')
+        self.depth_sub = Subscriber(self, Image, '/rgbd/depth/image_raw')
         self.odom_sub = Subscriber(self, Odometry, '/odom')
 
         # ApproximateTimeSynchronizer for synchronizing messages with a slop of 0.1 seconds
@@ -56,17 +56,17 @@ class SemanticMappingNode(Node):
 
 
         # 创建一个tf2的Buffer对象，存储TF变换
-        self.tf_buffer = Buffer()
+        # self.tf_buffer = Buffer()
 
-        # 创建一个TransformListener对象，监听TF变换
-        self.tf_listener = TransformListener(self.tf_buffer, self)
+        # # 创建一个TransformListener对象，监听TF变换
+        # self.tf_listener = TransformListener(self.tf_buffer, self)
 
-        trans = self.tf_buffer.lookup_transform('odom', 'camera_link', rclpy.time.Time())
-        self.tf_matrix = self.transform_to_matrix(trans)
+        # trans = self.tf_buffer.lookup_transform('odom', 'rgbd_link', rclpy.time.Time())
+        # self.tf_matrix = self.transform_to_matrix(trans)
         #self.get_logger().info(f'Transform Matrix:\n{transform_matrix}'
 
         # Create a timer that periodically processes the data
-        self.timer = self.create_timer(0.5, self.timer_callback)  # Timer to call function every 0.5 seconds
+        self.timer = self.create_timer(0.02, self.timer_callback)  # Timer to call function every 0.5 seconds
 
     def transform_to_matrix(self, trans: TransformStamped) -> np.ndarray:
         # 从TransformStamped中获取平移和旋转（四元数）
@@ -74,13 +74,30 @@ class SemanticMappingNode(Node):
         rotation = trans.transform.rotation
 
         # 将四元数转换为3x3的旋转矩阵
-        rotation_matrix = tf_transformations.quaternion_matrix([rotation.x, rotation.y, rotation.z, rotation.w])[:3, :3]
+        rotation_matrix = tfs.quaternions.quat2mat([rotation.x, rotation.y, rotation.z, rotation.w])[:3, :3]
 
         # 创建4x4的变换矩阵
         transform_matrix = np.eye(4)  # 初始化为单位矩阵
         transform_matrix[:3, :3] = rotation_matrix  # 设置旋转矩阵
         transform_matrix[:3, 3] = [translation.x, translation.y, translation.z]  # 设置平移向量
 
+        return transform_matrix
+    
+    def create_transform_matrix(self, position, orientation):
+        # 提取位置
+        x, y, z = position.x, position.y, position.z
+        
+        # 提取四元数
+        qx, qy, qz, qw = orientation.x, orientation.y, orientation.z, orientation.w
+        
+        # 将四元数转换为旋转矩阵
+        rotation_matrix = tfs.quaternions.quat2mat([qx, qy, qz, qw])[:3, :3]
+        
+        # 创建 4x4 变换矩阵
+        transform_matrix = np.eye(4)
+        transform_matrix[:3, :3] = rotation_matrix
+        transform_matrix[:3, 3] = [x, y, z]
+        
         return transform_matrix
 
 
@@ -93,12 +110,19 @@ class SemanticMappingNode(Node):
         position = odom_msg.pose.pose.position
         self.robot_xy = (position.x, position.y)
 
+        self.tf_matrix = self.create_transform_matrix(position,odom_msg.pose.pose.orientation)
+
         # 提取机器人的朝向（以四元数表示）
         orientation = odom_msg.pose.pose.orientation
         # 将四元数转换为欧拉角 (roll, pitch, yaw)
-        euler_angles = tf_transformations.euler_from_quaternion([orientation.x, orientation.y, orientation.z, orientation.w])
+        euler_angles = tfs.quaternions.quat2axangle([orientation.x, orientation.y, orientation.z, orientation.w])
         # 偏航角 yaw 就是机器人朝向
-        self.robot_heading = euler_angles[2]
+
+        self.robot_heading = euler_angles[0][2]
+
+        self.get_logger().info(f"Position: {self.robot_xy}")
+        self.get_logger().info(f"Heading (radians): {self.robot_heading}")
+        #self.get_logger().info(f"Transform Matrix:\n{self.tf_matrix}")
 
     def timer_callback(self):
         # This function is called periodically by the timer
@@ -120,7 +144,9 @@ class SemanticMappingNode(Node):
 
         self._obstacle_map.update_agent_traj(self.robot_xy, self.robot_heading)
 
+        semantic_map = self._obstacle_map.visualize()
 
+        self.show_map(semantic_map)
 
         # Process the available images and odom data
         self.get_logger().info("Processing data in timer thread...")

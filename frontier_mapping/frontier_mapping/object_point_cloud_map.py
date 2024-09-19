@@ -6,7 +6,7 @@ import numpy as np
 import open3d as o3d
 
 # 导入几何工具函数
-from geometry_utils import (
+from frontier_mapping.geometry_utils import (
     extract_yaw,            # 提取旋转矩阵中的yaw角
     get_point_cloud,         # 从深度图像生成点云
     transform_points,        # 转换点坐标到不同的参考系

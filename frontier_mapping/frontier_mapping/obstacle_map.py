@@ -3,12 +3,14 @@ from typing import Any, Union
 
 import cv2
 import numpy as np
-from frontier_exploration.frontier_detection import detect_frontier_waypoints
-from frontier_exploration.utils.fog_of_war import reveal_fog_of_war
+from frontier_mapping.frontier_detection import detect_frontier_waypoints
+from frontier_mapping.fog_of_war import reveal_fog_of_war
 
-from base_map import BaseMap
-from geometry_utils import extract_yaw, get_point_cloud, transform_points
-from img_utils import fill_small_holes
+from frontier_mapping.base_map import BaseMap
+from frontier_mapping.geometry_utils import extract_yaw, get_point_cloud, transform_points
+from frontier_mapping.img_utils import fill_small_holes
+
+import open3d as o3d
 
 class ObstacleMap(BaseMap):
     """生成两个地图: 一个表示机器人已经探索的区域，
@@ -29,7 +31,7 @@ class ObstacleMap(BaseMap):
         area_thresh: float = 3.0,  # 面积阈值，单位为平方米
         hole_area_thresh: int = 100000,  # 小孔的面积阈值，单位为像素
         size: int = 1000,  # 地图的尺寸
-        pixels_per_meter: int = 20,  # 每米对应的像素数
+        pixels_per_meter: int = 10,  # 每米对应的像素数
     ):
         super().__init__(size, pixels_per_meter)  # 调用父类的构造函数
         # 初始化探索区域、地图和可导航区域
@@ -96,6 +98,14 @@ class ObstacleMap(BaseMap):
             mask = scaled_depth < max_depth
             # 生成相机坐标系中的点云
             point_cloud_camera_frame = get_point_cloud(scaled_depth, mask, fx, fy)
+
+            # # # # 创建点云对象
+            # pcd = o3d.geometry.PointCloud()
+            # pcd.points = o3d.utility.Vector3dVector(point_cloud_camera_frame)
+
+            # # # 可视化点云
+            # o3d.visualization.draw_geometries([pcd])
+
             # 将点云转换到时间坐标系
             point_cloud_episodic_frame = transform_points(tf_camera_to_episodic, point_cloud_camera_frame)
             # 按照高度过滤点云，保留在指定高度范围内的点
@@ -193,12 +203,12 @@ class ObstacleMap(BaseMap):
         # 翻转图像以匹配顶部视角
         vis_img = cv2.flip(vis_img, 0)
 
-        if len(self._camera_positions) > 0:
-            self._traj_vis.draw_trajectory(
-                vis_img,
-                self._camera_positions,
-                self._last_camera_yaw,
-            )
+        # if len(self._camera_positions) > 0:
+        #     self._traj_vis.draw_trajectory(
+        #         vis_img,
+        #         self._camera_positions,
+        #         self._last_camera_yaw,
+        #     )
 
         return vis_img
 

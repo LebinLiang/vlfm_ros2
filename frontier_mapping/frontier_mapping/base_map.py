@@ -2,7 +2,7 @@
 
 from typing import Any, List
 import numpy as np
-from traj_visualizer import TrajectoryVisualizer
+from frontier_mapping.traj_visualizer import TrajectoryVisualizer
 
 class BaseMap:
     # 定义类属性，用于存储摄像头位置、上一次摄像头的偏航角和地图数据类型

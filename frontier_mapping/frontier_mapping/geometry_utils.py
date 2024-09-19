@@ -225,6 +225,9 @@ def transform_points(transformation_matrix: np.ndarray, points: np.ndarray) -> n
     Returns:
         np.ndarray: 变换后的点集 (N, 3)。
     """
+    if points.ndim == 1:
+        points = points[:, np.newaxis]
+        
     # 将点转换为齐次坐标
     points_homogeneous = np.hstack([points, np.ones((points.shape[0], 1))])
 
