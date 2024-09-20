@@ -57,7 +57,7 @@ class SemanticMappingNode(Node):
         self.current_depth_image = None
         self.current_odom = None
 
-        self.robot_xy  =(0,0)
+        self.robot_xy  = np.array([0, 0])
         self.robot_heading=  0.0
 
 
@@ -96,7 +96,7 @@ class SemanticMappingNode(Node):
         self.get_logger().info(f"Heading (radians): {euler_angles[2]}")
         # 将四元数转换为3x3的旋转矩阵
         # rotation_matrix = tfs.quaternions.quat2mat([rotation.x, rotation.y, rotation.z, rotation.w])
-
+        self.robot_heading = euler_angles[2]
         # 创建4x4的变换矩阵
         transform_matrix = np.eye(4)  # 初始化为单位矩阵
         transform_matrix = create_transformation_matrix([translation.x, translation.y, translation.z] , euler_angles[0] , euler_angles[1] ,euler_angles[2])
@@ -116,17 +116,17 @@ class SemanticMappingNode(Node):
         self.current_odom = odom_msg
         
         position = odom_msg.pose.pose.position
-        self.robot_xy = (position.x, position.y)
+        self.robot_xy = np.array([position.x, position.y])
 
         # self.tf_matrix = self.create_transform_matrix(position,odom_msg.pose.pose.orientation)
 
         # 提取机器人的朝向（以四元数表示）
         orientation = odom_msg.pose.pose.orientation
         # 将四元数转换为欧拉角 (roll, pitch, yaw)
-        euler_angles = tfs.euler.quat2euler([orientation.x, orientation.y, orientation.z, orientation.w])
+        euler_angles = tfs.euler.quat2euler([orientation.w,orientation.x, orientation.y, orientation.z])
         # 偏航角 yaw 就是机器人朝向
 
-        self.robot_heading = euler_angles[2]
+        #self.robot_heading = euler_angles[2]
 
         #self.get_logger().info(f"Position: {self.robot_xy}")
         #self.get_logger().info(f"Heading (radians): {self.robot_heading}")
@@ -167,7 +167,7 @@ class SemanticMappingNode(Node):
         point_cloud_msg = self.create_point_cloud_msg(self._obstacle_map.point_cloud_episodic_frame)
         self.point_cloud_pub.publish(point_cloud_msg)
 
-        #self._obstacle_map.update_agent_traj(self.robot_xy, self.robot_heading)
+        self._obstacle_map.update_agent_traj(self.robot_xy, self.robot_heading)
 
         semantic_map = self._obstacle_map.visualize()
 
