@@ -17,6 +17,10 @@ from tf2_ros import TransformListener, Buffer
 from geometry_msgs.msg import TransformStamped
 import transforms3d as tfs
 
+from sensor_msgs.msg import PointCloud2, PointField
+from std_msgs.msg import Header
+from sensor_msgs_py.point_cloud2 import create_cloud_xyz32
+
 class SemanticMappingNode(Node):
     def __init__(self):
         super().__init__('semantic_mapping_node')
@@ -25,8 +29,8 @@ class SemanticMappingNode(Node):
         
         #self._object_map: ObjectPointCloudMap = ObjectPointCloudMap(erosion_size=1.0)
         self._obstacle_map = ObstacleMap(
-                min_height=0.1,
-                max_height=1.0,
+                min_height=0.4,
+                max_height=0.5,
                 area_thresh=1.5,
                 agent_radius=0.18,
                 hole_area_thresh=100000,
@@ -42,6 +46,8 @@ class SemanticMappingNode(Node):
         self.depth_sub = Subscriber(self, Image, '/rgbd/depth/image_raw')
         self.odom_sub = Subscriber(self, Odometry, '/odom')
 
+        self.point_cloud_pub = self.create_publisher(PointCloud2, 'point_cloud_topic', 10)
+
         # ApproximateTimeSynchronizer for synchronizing messages with a slop of 0.1 seconds
         self.ts = ApproximateTimeSynchronizer([self.rgb_sub, self.depth_sub, self.odom_sub], queue_size=10, slop=0.1)
         self.ts.registerCallback(self.data_callback)
@@ -56,17 +62,28 @@ class SemanticMappingNode(Node):
 
 
         # 创建一个tf2的Buffer对象，存储TF变换
-        # self.tf_buffer = Buffer()
+        self.tf_buffer = Buffer()
 
-        # # 创建一个TransformListener对象，监听TF变换
-        # self.tf_listener = TransformListener(self.tf_buffer, self)
+        # 创建一个TransformListener对象，监听TF变换
+        self.tf_listener = TransformListener(self.tf_buffer, self)
 
         # trans = self.tf_buffer.lookup_transform('odom', 'rgbd_link', rclpy.time.Time())
         # self.tf_matrix = self.transform_to_matrix(trans)
-        #self.get_logger().info(f'Transform Matrix:\n{transform_matrix}'
+        # self.get_logger().info(f'Transform Matrix:\n{transform_matrix}'
 
         # Create a timer that periodically processes the data
-        self.timer = self.create_timer(0.02, self.timer_callback)  # Timer to call function every 0.5 seconds
+        self.timer = self.create_timer(0.1, self.timer_callback)  # Timer to call function every 0.5 seconds
+
+    def create_point_cloud_msg(self, points):
+        """
+        将点云数组转换为 sensor_msgs/PointCloud2 消息格式。
+        """
+        header = Header()
+        header.stamp = self.get_clock().now().to_msg()
+        header.frame_id = "odom"  # 指定点云的坐标系，可以根据需要修改
+
+        # 使用 sensor_msgs_py.point_cloud2 提供的工具函数将XYZ点转换为PointCloud2消息
+        return create_cloud_xyz32(header, points)
 
     def transform_to_matrix(self, trans: TransformStamped) -> np.ndarray:
         # 从TransformStamped中获取平移和旋转（四元数）
@@ -96,7 +113,7 @@ class SemanticMappingNode(Node):
         # 创建 4x4 变换矩阵
         transform_matrix = np.eye(4)
         transform_matrix[:3, :3] = rotation_matrix
-        transform_matrix[:3, 3] = [x, y, z]
+        transform_matrix[:3, 3] = [-x, -y, 0]
         
         return transform_matrix
 
@@ -105,12 +122,13 @@ class SemanticMappingNode(Node):
         # Convert ROS images to OpenCV format using CvBridge
         self.current_rgb_image = self.bridge.imgmsg_to_cv2(rgb_msg, "bgr8")
         self.current_depth_image = self.bridge.imgmsg_to_cv2(depth_msg, "32FC1")
+        
         self.current_odom = odom_msg
-
+        
         position = odom_msg.pose.pose.position
         self.robot_xy = (position.x, position.y)
 
-        self.tf_matrix = self.create_transform_matrix(position,odom_msg.pose.pose.orientation)
+        # self.tf_matrix = self.create_transform_matrix(position,odom_msg.pose.pose.orientation)
 
         # 提取机器人的朝向（以四元数表示）
         orientation = odom_msg.pose.pose.orientation
@@ -129,6 +147,20 @@ class SemanticMappingNode(Node):
         if self.current_rgb_image is None or self.current_depth_image is None or self.current_odom is None:
             self.get_logger().warn("Waiting for all data to be available.")
             return
+        
+        try:
+            # 查询从 'base_link' 到 'odom' 的变换
+            now = rclpy.time.Time()
+            trans = self.tf_buffer.lookup_transform('odom', 'base_link', now)
+
+            # 打印位置信息和平移向量
+            self.get_logger().info(f"Translation: {trans.transform.translation}")
+            self.get_logger().info(f"Rotation: {trans.transform.rotation}")
+
+            self.tf_matrix = self.transform_to_matrix(trans)
+
+        except Exception as e:
+            self.get_logger().warn(f"Could not transform: {e}")
 
 
         self._obstacle_map.update_map(
@@ -139,10 +171,13 @@ class SemanticMappingNode(Node):
                 self.fx,
                 self.fy,
                 self.topdown_fov,
-                explore=False,
+                explore=True,
             )
 
-        self._obstacle_map.update_agent_traj(self.robot_xy, self.robot_heading)
+        point_cloud_msg = self.create_point_cloud_msg(self._obstacle_map.point_cloud_episodic_frame)
+        self.point_cloud_pub.publish(point_cloud_msg)
+
+        #self._obstacle_map.update_agent_traj(self.robot_xy, self.robot_heading)
 
         semantic_map = self._obstacle_map.visualize()
 

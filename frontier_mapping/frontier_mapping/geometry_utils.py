@@ -302,3 +302,61 @@ def pt_from_rho_theta(rho: float, theta: float) -> Tuple[float, float]:
     y = rho * np.sin(theta)
     return x, y
 
+def euler_to_matrix(roll, pitch, yaw):
+    """
+    将欧拉角 (roll, pitch, yaw) 转换为旋转矩阵。
+    
+    Args:
+        roll (float): 绕x轴的旋转角（弧度）。
+        pitch (float): 绕y轴的旋转角（弧度）。
+        yaw (float): 绕z轴的旋转角（弧度）。
+    
+    Returns:
+        np.ndarray: 3x3的旋转矩阵。
+    """
+    # 绕x轴的旋转矩阵
+    Rx = np.array([
+        [1, 0, 0],
+        [0, np.cos(roll), -np.sin(roll)],
+        [0, np.sin(roll), np.cos(roll)]
+    ])
+    
+    # 绕y轴的旋转矩阵
+    Ry = np.array([
+        [np.cos(pitch), 0, np.sin(pitch)],
+        [0, 1, 0],
+        [-np.sin(pitch), 0, np.cos(pitch)]
+    ])
+    
+    # 绕z轴的旋转矩阵
+    Rz = np.array([
+        [np.cos(yaw), -np.sin(yaw), 0],
+        [np.sin(yaw), np.cos(yaw), 0],
+        [0, 0, 1]
+    ])
+    
+    # 组合旋转矩阵：R = Rz * Ry * Rx
+    return Rz @ Ry @ Rx
+
+def create_transformation_matrix(translation, roll, pitch, yaw):
+    """
+    创建从相机坐标系到baselink的4x4变换矩阵，使用欧拉角定义旋转部分。
+    
+    Args:
+        translation (list): [tx, ty, tz]，表示平移向量。
+        roll (float): 绕x轴的旋转角。
+        pitch (float): 绕y轴的旋转角。
+        yaw (float): 绕z轴的旋转角。
+    
+    Returns:
+        np.ndarray: 4x4的变换矩阵。
+    """
+    # 生成旋转矩阵
+    R = euler_to_matrix(roll, pitch, yaw)
+    
+    # 创建4x4的齐次变换矩阵
+    T = np.eye(4)
+    T[:3, :3] = R  # 设置旋转矩阵
+    T[:3, 3] = translation  # 设置平移向量
+    
+    return T

@@ -7,7 +7,7 @@ from frontier_mapping.frontier_detection import detect_frontier_waypoints
 from frontier_mapping.fog_of_war import reveal_fog_of_war
 
 from frontier_mapping.base_map import BaseMap
-from frontier_mapping.geometry_utils import extract_yaw, get_point_cloud, transform_points
+from frontier_mapping.geometry_utils import extract_yaw, get_point_cloud, transform_points,create_transformation_matrix
 from frontier_mapping.img_utils import fill_small_holes
 
 import open3d as o3d
@@ -50,6 +50,10 @@ class ObstacleMap(BaseMap):
         kernel_size = int(kernel_size) + (int(kernel_size) % 2 == 0)
         # 初始化用于膨胀操作的卷积核
         self._navigable_kernel = np.ones((kernel_size, kernel_size), np.uint8)
+
+        pcd = o3d.geometry.PointCloud()
+        self.points = np.asarray(pcd.points)
+        self.point_cloud_episodic_frame =  np.asarray(pcd.points)
 
     def reset(self) -> None:
         """重置地图，清空探索区域和障碍物地图"""
@@ -96,20 +100,32 @@ class ObstacleMap(BaseMap):
             # 将深度图像缩放到实际深度范围
             scaled_depth = filled_depth * (max_depth - min_depth) + min_depth
             mask = scaled_depth < max_depth
-            # 生成相机坐标系中的点云
-            point_cloud_camera_frame = get_point_cloud(scaled_depth, mask, fx, fy)
 
-            # # # # 创建点云对象
+            o3d_depth_image = o3d.geometry.Image(filled_depth)
+
+            camera_intrinsic = o3d.camera.PinholeCameraIntrinsic(640, 480, fx=554.0, fy=554.0, cx=320.0, cy=240.0)
+            
+            pcd_1 = o3d.geometry.PointCloud.create_from_depth_image(o3d_depth_image, camera_intrinsic)
+
+            raw_points = np.asarray(pcd_1.points)
+            # 生成相机坐标系中的点云
+            #point_cloud_camera_frame = get_point_cloud(scaled_depth, mask, fx, fy)
+            tf_camera_to_base = create_transformation_matrix([0,0,0],1.57,3.14,-1.57)
+
+            self.points = transform_points(tf_camera_to_base, raw_points)
+            # # # # # 创建点云对象
             # pcd = o3d.geometry.PointCloud()
-            # pcd.points = o3d.utility.Vector3dVector(point_cloud_camera_frame)
+            # pcd.points = o3d.utility.Vector3dVector(points)
 
             # # # 可视化点云
             # o3d.visualization.draw_geometries([pcd])
 
             # 将点云转换到时间坐标系
-            point_cloud_episodic_frame = transform_points(tf_camera_to_episodic, point_cloud_camera_frame)
+            self.point_cloud_episodic_frame = transform_points(tf_camera_to_episodic, self.points)
+
+
             # 按照高度过滤点云，保留在指定高度范围内的点
-            obstacle_cloud = filter_points_by_height(point_cloud_episodic_frame, self._min_height, self._max_height)
+            obstacle_cloud = filter_points_by_height(self.point_cloud_episodic_frame, self._min_height, self._max_height)
 
             # 更新顶视图中的障碍物位置
             xy_points = obstacle_cloud[:, :2]
@@ -203,12 +219,12 @@ class ObstacleMap(BaseMap):
         # 翻转图像以匹配顶部视角
         vis_img = cv2.flip(vis_img, 0)
 
-        # if len(self._camera_positions) > 0:
-        #     self._traj_vis.draw_trajectory(
-        #         vis_img,
-        #         self._camera_positions,
-        #         self._last_camera_yaw,
-        #     )
+        if len(self._camera_positions) > 0:
+            self._traj_vis.draw_trajectory(
+                vis_img,
+                self._camera_positions,
+                self._last_camera_yaw,
+            )
 
         return vis_img
 
