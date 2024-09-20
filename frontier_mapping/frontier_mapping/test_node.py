@@ -6,10 +6,13 @@ from nav_msgs.msg import Odometry
 from cv_bridge import CvBridge
 import cv2
 import numpy as np
-from message_filters import ApproximateTimeSynchronizer, Subscriber
+from message_filters import ApproximateTimeSynchronizer, Subscriber # 同步多个传感器输入
+
+import os
+import sys
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from frontier_mapping.traj_visualizer import TrajectoryVisualizer
-
 from frontier_mapping.obstacle_map import ObstacleMap
 from frontier_mapping.object_point_cloud_map import ObjectPointCloudMap
 
@@ -38,12 +41,12 @@ class SemanticMappingNode(Node):
         self.topdown_fov = 1.3
 
         # Initialize Subscribers for RGB image, Depth image, and Odom data
-        self.rgb_sub = Subscriber(self, Image, '/rgb/image_raw')
-        self.depth_sub = Subscriber(self, Image, '/rgbd/depth/image_raw')
-        self.odom_sub = Subscriber(self, Odometry, '/odom')
+        self.rgb_sub = Subscriber(self, Image, '/realsense/image_raw')
+        self.depth_sub = Subscriber(self, Image, '/realsense/depth/image_raw')
+        self.odom_sub = Subscriber(self, Odometry, '/Odometry')
 
         # ApproximateTimeSynchronizer for synchronizing messages with a slop of 0.1 seconds
-        self.ts = ApproximateTimeSynchronizer([self.rgb_sub, self.depth_sub, self.odom_sub], queue_size=10, slop=0.1)
+        self.ts = ApproximateTimeSynchronizer([self.rgb_sub, self.depth_sub, self.odom_sub], queue_size=10, slop=0.1) 
         self.ts.registerCallback(self.data_callback)
 
         # Variables to store the current sensor data
@@ -51,8 +54,8 @@ class SemanticMappingNode(Node):
         self.current_depth_image = None
         self.current_odom = None
 
-        self.robot_xy  =(0,0)
-        self.robot_heading=  0.0
+        self.robot_xy = (0, 0)
+        self.robot_heading = 0.0
 
 
         # 创建一个tf2的Buffer对象，存储TF变换
@@ -103,26 +106,26 @@ class SemanticMappingNode(Node):
 
     def data_callback(self, rgb_msg, depth_msg, odom_msg):
         # Convert ROS images to OpenCV format using CvBridge
-        self.current_rgb_image = self.bridge.imgmsg_to_cv2(rgb_msg, "bgr8")
+        self.current_rgb_image = self.bridge.imgmsg_to_cv2(rgb_msg, "rgb8")
         self.current_depth_image = self.bridge.imgmsg_to_cv2(depth_msg, "32FC1")
         self.current_odom = odom_msg
 
         position = odom_msg.pose.pose.position
         self.robot_xy = (position.x, position.y)
 
-        self.tf_matrix = self.create_transform_matrix(position,odom_msg.pose.pose.orientation)
+        self.tf_matrix = self.create_transform_matrix(position, odom_msg.pose.pose.orientation)
 
         # 提取机器人的朝向（以四元数表示）
         orientation = odom_msg.pose.pose.orientation
         # 将四元数转换为欧拉角 (roll, pitch, yaw)
         euler_angles = tfs.quaternions.quat2axangle([orientation.x, orientation.y, orientation.z, orientation.w])
         # 偏航角 yaw 就是机器人朝向
-
         self.robot_heading = euler_angles[0][2]
 
-        self.get_logger().info(f"Position: {self.robot_xy}")
-        self.get_logger().info(f"Heading (radians): {self.robot_heading}")
-        #self.get_logger().info(f"Transform Matrix:\n{self.tf_matrix}")
+        # self.get_logger().info(f"Position: {self.robot_xy}")
+        # self.get_logger().info(f"Heading (radians): {self.robot_heading}")
+        print(self.current_depth_image)
+        # self.get_logger().info(f"Transform Matrix:\n{self.tf_matrix}")
 
     def timer_callback(self):
         # This function is called periodically by the timer
