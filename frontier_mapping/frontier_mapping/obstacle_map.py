@@ -110,7 +110,7 @@ class ObstacleMap(BaseMap):
             raw_points = np.asarray(pcd_1.points)
             # 生成相机坐标系中的点云
             #point_cloud_camera_frame = get_point_cloud(scaled_depth, mask, fx, fy)
-            tf_camera_to_base = create_transformation_matrix([0,0,0],1.57,3.14,-1.57)
+            tf_camera_to_base = create_transformation_matrix([0,0,0],1.57,3.14,1.57)
 
             self.points = transform_points(tf_camera_to_base, raw_points)
             # # # # # 创建点云对象

@@ -16,7 +16,7 @@ from frontier_mapping.object_point_cloud_map import ObjectPointCloudMap
 from tf2_ros import TransformListener, Buffer
 from geometry_msgs.msg import TransformStamped
 import transforms3d as tfs
-
+from frontier_mapping.geometry_utils import transform_points,create_transformation_matrix
 from sensor_msgs.msg import PointCloud2, PointField
 from std_msgs.msg import Header
 from sensor_msgs_py.point_cloud2 import create_cloud_xyz32
@@ -90,32 +90,22 @@ class SemanticMappingNode(Node):
         translation = trans.transform.translation
         rotation = trans.transform.rotation
 
+        euler_angles = tfs.euler.quat2euler([rotation.w,rotation.x, rotation.y, rotation.z])
+    
+
+        self.get_logger().info(f"Heading (radians): {euler_angles[2]}")
         # 将四元数转换为3x3的旋转矩阵
-        rotation_matrix = tfs.quaternions.quat2mat([rotation.x, rotation.y, rotation.z, rotation.w])[:3, :3]
+        # rotation_matrix = tfs.quaternions.quat2mat([rotation.x, rotation.y, rotation.z, rotation.w])
 
         # 创建4x4的变换矩阵
         transform_matrix = np.eye(4)  # 初始化为单位矩阵
-        transform_matrix[:3, :3] = rotation_matrix  # 设置旋转矩阵
-        transform_matrix[:3, 3] = [translation.x, translation.y, translation.z]  # 设置平移向量
+        transform_matrix = create_transformation_matrix([translation.x, translation.y, translation.z] , euler_angles[0] , euler_angles[1] ,euler_angles[2])
+
+        # transform_matrix[:3, :3] = rotation_matrix  # 设置旋转矩阵
+        # transform_matrix[:3, 3] = [translation.x, translation.y, translation.z]  # 设置平移向量
 
         return transform_matrix
     
-    def create_transform_matrix(self, position, orientation):
-        # 提取位置
-        x, y, z = position.x, position.y, position.z
-        
-        # 提取四元数
-        qx, qy, qz, qw = orientation.x, orientation.y, orientation.z, orientation.w
-        
-        # 将四元数转换为旋转矩阵
-        rotation_matrix = tfs.quaternions.quat2mat([qx, qy, qz, qw])[:3, :3]
-        
-        # 创建 4x4 变换矩阵
-        transform_matrix = np.eye(4)
-        transform_matrix[:3, :3] = rotation_matrix
-        transform_matrix[:3, 3] = [-x, -y, 0]
-        
-        return transform_matrix
 
 
     def data_callback(self, rgb_msg, depth_msg, odom_msg):
@@ -133,13 +123,13 @@ class SemanticMappingNode(Node):
         # 提取机器人的朝向（以四元数表示）
         orientation = odom_msg.pose.pose.orientation
         # 将四元数转换为欧拉角 (roll, pitch, yaw)
-        euler_angles = tfs.quaternions.quat2axangle([orientation.x, orientation.y, orientation.z, orientation.w])
+        euler_angles = tfs.euler.quat2euler([orientation.x, orientation.y, orientation.z, orientation.w])
         # 偏航角 yaw 就是机器人朝向
 
-        self.robot_heading = euler_angles[0][2]
+        self.robot_heading = euler_angles[2]
 
-        self.get_logger().info(f"Position: {self.robot_xy}")
-        self.get_logger().info(f"Heading (radians): {self.robot_heading}")
+        #self.get_logger().info(f"Position: {self.robot_xy}")
+        #self.get_logger().info(f"Heading (radians): {self.robot_heading}")
         #self.get_logger().info(f"Transform Matrix:\n{self.tf_matrix}")
 
     def timer_callback(self):
@@ -154,8 +144,8 @@ class SemanticMappingNode(Node):
             trans = self.tf_buffer.lookup_transform('odom', 'base_link', now)
 
             # 打印位置信息和平移向量
-            self.get_logger().info(f"Translation: {trans.transform.translation}")
-            self.get_logger().info(f"Rotation: {trans.transform.rotation}")
+            #self.get_logger().info(f"Translation: {trans.transform.translation}")
+            #self.get_logger().info(f"Rotation: {trans.transform.rotation}")
 
             self.tf_matrix = self.transform_to_matrix(trans)
 
